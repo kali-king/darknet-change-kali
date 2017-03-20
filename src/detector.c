@@ -746,7 +746,6 @@ void test_detector_kali_txt(char *datacfg, char *cfgfile, char *weightfile, char
                     float prob = probs[i][label_index];
                     if(prob > thresh)
                     {
-                        printf("thresh:%f\n",thresh);
                         fprintf(fp,"%s %f %f %f %f %f\n",label, boxes[i].x, boxes[i].y, boxes[i].w, boxes[i].h, prob);
                     }
                 }
