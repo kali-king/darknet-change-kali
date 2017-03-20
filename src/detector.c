@@ -365,7 +365,7 @@ void validate_detector(char *datacfg, char *cfgfile, char *weightfile, char *out
     fprintf(stderr, "Total Detection Time: %f Seconds\n", (double)(time(0) - start));
 }
 
-void validate_detector_recall(char *cfgfile, char *weightfile)
+void validate_detector_recall(char *datacfg, char *cfgfile, char *weightfile, char *record_path)//kali-add the first parameter
 {
     network net = parse_network_cfg(cfgfile);
     if(weightfile){
@@ -375,8 +375,12 @@ void validate_detector_recall(char *cfgfile, char *weightfile)
     fprintf(stderr, "Learning Rate: %g, Momentum: %g, Decay: %g\n", net.learning_rate, net.momentum, net.decay);
     srand(time(0));
 
-    list *plist = get_paths("data/voc.2007.test");
+    //change by kali
+    list *options = read_data_cfg(datacfg);
+    char *valid_images_path = option_find_str(options, "valid", "data/train.list");
+    list *plist = get_paths(valid_images_path);
     char **paths = (char **)list_to_array(plist);
+    //change by kali
 
     layer l = net.layers[net.n-1];
     int classes = l.classes;
@@ -389,7 +393,8 @@ void validate_detector_recall(char *cfgfile, char *weightfile)
     int m = plist->size;
     int i=0;
 
-    float thresh = .001;
+    //float thresh = .001;
+    float thresh = .25;
     float iou_thresh = .5;
     float nms = .4;
 
@@ -398,48 +403,62 @@ void validate_detector_recall(char *cfgfile, char *weightfile)
     int proposals = 0;
     float avg_iou = 0;
 
-    for(i = 0; i < m; ++i){
-        char *path = paths[i];
-        image orig = load_image_color(path, 0, 0);
-        image sized = resize_image(orig, net.w, net.h);
-        char *id = basecfg(path);
-        network_predict(net, sized.data);
-        get_region_boxes(l, 1, 1, thresh, probs, boxes, 1, 0, .5);
-        if (nms) do_nms(boxes, probs, l.w*l.h*l.n, 1, nms);
+    if(!record_path)
+        record_path = "record.txt";
 
-        char labelpath[4096];
-        find_replace(path, "images", "labels", labelpath);
-        find_replace(labelpath, "JPEGImages", "labels", labelpath);
-        find_replace(labelpath, ".jpg", ".txt", labelpath);
-        find_replace(labelpath, ".JPEG", ".txt", labelpath);
+    FILE *fp;
+    fp=fopen(record_path,"w");
+    if(fp)
+    {
+        for(i = 0; i < m; ++i)
+        {
+            char *path = paths[i];
+            image orig = load_image_color(path, 0, 0);
+            image sized = resize_image(orig, net.w, net.h);
+            char *id = basecfg(path);
+            network_predict(net, sized.data);
+            get_region_boxes(l, 1, 1, thresh, probs, boxes, 1, 0, .5);
+            if (nms) do_nms(boxes, probs, l.w*l.h*l.n, 1, nms);
 
-        int num_labels = 0;
-        box_label *truth = read_boxes(labelpath, &num_labels);
-        for(k = 0; k < l.w*l.h*l.n; ++k){
-            if(probs[k][0] > thresh){
-                ++proposals;
-            }
-        }
-        for (j = 0; j < num_labels; ++j) {
-            ++total;
-            box t = {truth[j].x, truth[j].y, truth[j].w, truth[j].h};
-            float best_iou = 0;
+            char labelpath[4096];
+            find_replace(path, "images", "labels", labelpath);
+            find_replace(labelpath, "JPEGImages", "labels", labelpath);
+            find_replace(labelpath, ".jpg", ".txt", labelpath);
+            find_replace(labelpath, ".JPEG", ".txt", labelpath);
+
+            int num_labels = 0;
+            box_label *truth = read_boxes(labelpath, &num_labels);
             for(k = 0; k < l.w*l.h*l.n; ++k){
-                float iou = box_iou(boxes[k], t);
-                if(probs[k][0] > thresh && iou > best_iou){
-                    best_iou = iou;
+                if(probs[k][0] > thresh){
+                    ++proposals;
                 }
             }
-            avg_iou += best_iou;
-            if(best_iou > iou_thresh){
-                ++correct;
+            for (j = 0; j < num_labels; ++j) {
+                ++total;
+                box t = {truth[j].x, truth[j].y, truth[j].w, truth[j].h};
+                float best_iou = 0;
+                for(k = 0; k < l.w*l.h*l.n; ++k){
+                    float iou = box_iou(boxes[k], t);
+                    if(probs[k][0] > thresh && iou > best_iou){
+                        best_iou = iou;
+                    }
+                }
+                avg_iou += best_iou;
+                if(best_iou > iou_thresh){
+                    ++correct;
+                }
             }
-        }
 
-        fprintf(stderr, "%5d %5d %5d\tRPs/Img: %.2f\tIOU: %.2f%%\tRecall:%.2f%%\n", i, correct, total, (float)proposals/(i+1), avg_iou*100/total, 100.*correct/total);
-        free(id);
-        free_image(orig);
-        free_image(sized);
+            //fprintf(stderr, "%5d %5d %5d\tRPs/Img: %.2f\tIOU: %.2f%%\tRecall:%.2f%%\n", i, correct, total, (float)proposals/(i+1), avg_iou*100/total, 100.*correct/total);
+            fprintf(stderr, "ID:%5d Correct:%5d Total:%5d\tRPs/Img: %.2f\tIOU: %.2f%%\tRecall:%.2f%%\t", i, correct, total, (float)proposals/(i+1), avg_iou*100/total, 100.*correct/total);
+            fprintf(stderr, "proposals:%5d\tPrecision:%.2f%%\n",proposals,100.*correct/(float)proposals);
+            fprintf(fp,"ID:%5d Correct:%5d Total:%5d\tRPs/Img: %.2f\tIOU: %.2f%%\tRecall:%.2f%%\t", i, correct, total, (float)proposals/(i+1), avg_iou*100/total, 100.*correct/total);
+            fprintf(fp, "proposals:%5d\tPrecision:%.2f%%\n",proposals,100.*correct/(float)proposals);
+            free(id);
+            free_image(orig);
+            free_image(sized);
+        }
+        fclose(fp);
     }
 }
 
@@ -457,17 +476,17 @@ void test_detector(char *datacfg, char *cfgfile, char *weightfile, char *filenam
     set_batch_network(&net, 1);
     srand(2222222);
     clock_t time;
-    char buff[256];
+    char buff[1024];
     char *input = buff;
     int j;
     float nms=.4;
     while(1){
         if(filename){
-            strncpy(input, filename, 256);
+            strncpy(input, filename, 1024);
         } else {
             printf("Enter Image Path: ");
             fflush(stdout);
-            input = fgets(input, 256, stdin);
+            input = fgets(input, 1024, stdin);
             if(!input) return;
             strtok(input, "\n");
         }
@@ -486,6 +505,7 @@ void test_detector(char *datacfg, char *cfgfile, char *weightfile, char *filenam
         get_region_boxes(l, 1, 1, thresh, probs, boxes, 0, 0, hier_thresh);
         if (l.softmax_tree && nms) do_nms_obj(boxes, probs, l.w*l.h*l.n, l.classes, nms);
         else if (nms) do_nms_sort(boxes, probs, l.w*l.h*l.n, l.classes, nms);
+        printf("%d\n",l.classes);
         draw_detections(im, l.w*l.h*l.n, thresh, boxes, probs, names, alphabet, l.classes);
         save_image(im, "predictions");
         show_image(im, "predictions");
@@ -507,8 +527,8 @@ void listDir(char *read_filename, char *save_filename, network net,float nms,cha
 {
     DIR *pDir;
     struct dirent *ent;
-    char new_read_path[512];
-    char new_save_path[512];
+    char new_read_path[1024];
+    char new_save_path[1024];
 
     pDir=opendir(read_filename);
 
@@ -529,7 +549,8 @@ void listDir(char *read_filename, char *save_filename, network net,float nms,cha
             //判断新的存储路径是否存在，不存在创建
             if(access(new_save_path,R_OK|W_OK) !=0 )//文件夹不存在,创建
             {
-                char mkdir_cmd[512];
+                char mkdir_cmd[1024];
+                memset(mkdir_cmd,0,sizeof(mkdir_cmd));
                 sprintf(mkdir_cmd,"mkdir %s",new_save_path);
                 system(mkdir_cmd);
             }
@@ -538,7 +559,8 @@ void listDir(char *read_filename, char *save_filename, network net,float nms,cha
         else if(ent->d_type == 8)//文件
         {
             //检测处理
-            char image_path[512];
+            char image_path[1024];
+            memset(image_path,0,sizeof(image_path));
             sprintf(image_path,"%s/%s",read_filename,ent->d_name);
             printf("file:%s\n",image_path);
             image im = load_image_color(image_path,0,0);
@@ -559,9 +581,11 @@ void listDir(char *read_filename, char *save_filename, network net,float nms,cha
             draw_detections(im, l.w*l.h*l.n, thresh, boxes, probs, names, alphabet, l.classes);
             char *pos = strrchr(ent->d_name,'.');
             int len = (pos-ent->d_name);
-            char sub_image_name[512];
+            char sub_image_name[1024];
+            memset(sub_image_name,0,sizeof(sub_image_name));
             strncpy(sub_image_name,ent->d_name,len*sizeof(char));
             char save_path[1024];
+            memset(save_path,0,sizeof(save_path));
             sprintf(save_path,"%s/%s",save_filename,sub_image_name);
             printf("save path:%s\n",save_path);
             save_image(im, save_path);
@@ -571,12 +595,13 @@ void listDir(char *read_filename, char *save_filename, network net,float nms,cha
 
             //保存txt文件
             char txt_save_path[1024];
+            memset(txt_save_path,0,sizeof(txt_save_path));
             sprintf(txt_save_path,"%s/%s.txt",save_filename,sub_image_name);
             FILE *fp;
             fp=fopen(txt_save_path,"w");
             if(fp)
             {
-                fprintf(fp,"%s %s %s %s %s\n","label", "x", "y", "w", "h");
+                fprintf(fp,"%s %s %s %s %s %s\n","label", "x", "y", "w", "h" ,"prob");
                 int box_num = l.w*l.h*l.n;
                 for(int i=0;i<box_num;i++)
                 {
@@ -584,7 +609,7 @@ void listDir(char *read_filename, char *save_filename, network net,float nms,cha
                     char *label = names[label_index];
                     float prob = probs[i][label_index];
                     if(prob > thresh)
-                        fprintf(fp,"%s %f %f %f %f\n",label, boxes[i].x, boxes[i].y, boxes[i].w, boxes[i].h);
+                        fprintf(fp,"%s %f %f %f %f %s\n",label, boxes[i].x, boxes[i].y, boxes[i].w, boxes[i].h, prob);
                 }
                 fclose(fp);
 
@@ -600,6 +625,11 @@ void listDir(char *read_filename, char *save_filename, network net,float nms,cha
 //add by kali*****************
 void test_detector_kali(char *datacfg, char *cfgfile, char *weightfile, char *read_filename, char *save_filename, float thresh, float hier_thresh)
 {
+    if(!save_filename)
+    {
+        printf("Error:%s not exist!\n",save_filename);
+        return;
+    }
     list *options = read_data_cfg(datacfg);
     char *name_list = option_find_str(options, "names", "data/names.list");
     char **names = get_labels(name_list);
@@ -612,6 +642,126 @@ void test_detector_kali(char *datacfg, char *cfgfile, char *weightfile, char *re
     set_batch_network(&net, 1);
     float nms=.4;
     listDir(read_filename,save_filename,net,nms,names,alphabet,thresh,hier_thresh);//循环检测图片,批量处理
+}
+//add by kali*****************
+
+//add by kali*****************
+void test_detector_kali_txt(char *datacfg, char *cfgfile, char *weightfile, char *read_filename, char *save_filename, char *txt_path, float thresh, float hier_thresh)
+{
+    if(!save_filename)
+    {
+        printf("Error:%s not exist!\n",save_filename);
+        return;
+    }
+    list *options = read_data_cfg(datacfg);
+    char *name_list = option_find_str(options, "names", "data/names.list");
+    char **names = get_labels(name_list);
+
+    image **alphabet = load_alphabet();
+    network net = parse_network_cfg(cfgfile);
+    if(weightfile){
+        load_weights(&net, weightfile);
+    }
+    set_batch_network(&net, 1);
+    float nms=.4;
+
+    //直接读取txt文件中图片的路径
+    FILE *read_fp;
+    read_fp=fopen(txt_path,"r");
+    if(read_fp)
+    {
+        char* line_name = calloc(128,sizeof(line_name));
+        memset(line_name,0,128);
+        line_name = fgetl(read_fp);
+        while(line_name)
+        {
+            printf("kali-4\n");
+            //检测处理
+            char image_path[1024];
+            memset(image_path,0,sizeof(image_path));
+            sprintf(image_path,"%s/%s.jpg",read_filename,line_name);
+            printf("file:%s\n",image_path);
+            image im = load_image_color(image_path,0,0);
+            image sized = resize_image(im, net.w, net.h);
+            layer l = net.layers[net.n-1];
+
+            box *boxes = calloc(l.w*l.h*l.n, sizeof(box));
+            float **probs = calloc(l.w*l.h*l.n, sizeof(float *));
+            for(int j = 0; j < l.w*l.h*l.n; ++j) probs[j] = calloc(l.classes + 1, sizeof(float *));
+
+            float *X = sized.data;
+            network_predict(net, X);
+            get_region_boxes(l, 1, 1, thresh, probs, boxes, 0, 0, hier_thresh);
+            if (l.softmax_tree && nms) do_nms_obj(boxes, probs, l.w*l.h*l.n, l.classes, nms);
+            else if (nms) do_nms_sort(boxes, probs, l.w*l.h*l.n, l.classes, nms);
+            //检测处理
+
+            //判断新的存储路径是否存在，不存在创建
+            char *in_pos = strrchr(line_name,'/');
+            int len = (in_pos-line_name);
+            char in_name[64];
+            memset(in_name,0,sizeof(in_name));
+            strncpy(in_name,line_name,len*sizeof(char));
+            char new_save_path[1024];
+            memset(new_save_path,0,sizeof(new_save_path));
+            sprintf(new_save_path,"%s/%s",save_filename,in_name);
+            printf("%s\n",line_name);
+            printf("%s\n",in_name);
+            printf("%s\n",new_save_path);
+            if(access(new_save_path,R_OK|W_OK) !=0 )//文件夹不存在,创建
+            {
+                printf("%s\n",new_save_path);
+                char mkdir_cmd[1024];
+                memset(mkdir_cmd,0,sizeof(mkdir_cmd));
+                sprintf(mkdir_cmd,"mkdir %s",new_save_path);
+                system(mkdir_cmd);
+            }
+
+            //保存图片
+            draw_detections(im, l.w*l.h*l.n, thresh, boxes, probs, names, alphabet, l.classes);
+            char save_path[1024];
+            memset(save_path,0,sizeof(save_path));
+            sprintf(save_path,"%s/%s",save_filename,line_name);
+            printf("save path:%s\n",save_path);
+            save_image(im, save_path);
+
+            free_image(im);
+            free_image(sized);
+            //保存图片
+
+            //保存txt文件
+            char txt_save_path[1024];
+            memset(txt_save_path,0,sizeof(txt_save_path));
+            sprintf(txt_save_path,"%s/%s.txt",save_filename,line_name);
+            FILE *fp;
+            fp=fopen(txt_save_path,"w");
+            if(fp)
+            {
+                fprintf(fp,"%s %s %s %s %s %s\n","label", "x", "y", "w", "h" ,"prob");
+                int box_num = l.w*l.h*l.n;
+                for(int i=0;i<box_num;i++)
+                {
+                    int label_index = max_index(probs[i], l.classes);
+                    char *label = names[label_index];
+                    float prob = probs[i][label_index];
+                    if(prob > thresh)
+                    {
+                        printf("thresh:%f\n",thresh);
+                        fprintf(fp,"%s %f %f %f %f %f\n",label, boxes[i].x, boxes[i].y, boxes[i].w, boxes[i].h, prob);
+                    }
+                }
+                fclose(fp);
+            }
+            free(boxes);
+            free_ptrs((void **)probs, l.w*l.h*l.n);
+            //保存txt文件
+            memset(line_name,0,sizeof(line_name));
+            line_name = fgetl(read_fp);
+        }
+        free(line_name);
+        fclose(read_fp);
+    }
+    //直接读取txt文件中图片的路径
 }
 //add by kali*****************
 
@@ -628,6 +778,7 @@ void run_detector(int argc, char **argv)
     }
     char *gpu_list = find_char_arg(argc, argv, "-gpus", 0);
     char *outfile = find_char_arg(argc, argv, "-out", 0);
+    char *record_path = find_char_arg(argc, argv, "-record", 0);
     int *gpus = 0;
     int gpu = 0;
     int ngpus = 0;
@@ -659,7 +810,7 @@ void run_detector(int argc, char **argv)
     if(0==strcmp(argv[2], "test")) test_detector(datacfg, cfg, weights, filename, thresh, hier_thresh);
     else if(0==strcmp(argv[2], "train")) train_detector(datacfg, cfg, weights, gpus, ngpus, clear);
     else if(0==strcmp(argv[2], "valid")) validate_detector(datacfg, cfg, weights, outfile);
-    else if(0==strcmp(argv[2], "recall")) validate_detector_recall(cfg, weights);
+    else if(0==strcmp(argv[2], "recall")) validate_detector_recall(datacfg,cfg, weights,record_path);
     else if(0==strcmp(argv[2], "demo")) {
         list *options = read_data_cfg(datacfg);
         int classes = option_find_int(options, "classes", 20);

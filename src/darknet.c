@@ -14,9 +14,14 @@
 
 extern void predict_classifier(char *datacfg, char *cfgfile, char *weightfile, char *filename, int top);
 extern void test_detector(char *datacfg, char *cfgfile, char *weightfile, char *filename, float thresh, float hier_thresh);
+
 //add by kali*********
 extern void test_detector_kali(char *datacfg, char *cfgfile, char *weightfile, char *read_filename, char *save_filename, float thresh, float hier_thresh);
 //add by kali*********
+//add by kali*********
+extern void test_detector_kali_txt(char *datacfg, char *cfgfile, char *weightfile, char *read_filename, char *save_filename, char *txt_path, float thresh, float hier_thresh);
+//add by kali*********
+
 extern void run_voxel(int argc, char **argv);
 extern void run_yolo(int argc, char **argv);
 extern void run_detector(int argc, char **argv);
@@ -388,13 +393,22 @@ int main(int argc, char **argv)
     } else if (0 == strcmp(argv[1], "detect")){
         float thresh = find_float_arg(argc, argv, "-thresh", .24);
         char *filename = (argc > 4) ? argv[4]: 0;
-        test_detector("cfg/coco.data", argv[2], argv[3], filename, thresh, .5);
+        test_detector("cfg/voc.data", argv[2], argv[3], filename, thresh, .5);
         //add by kali**********************************
     } else if (0 == strcmp(argv[1], "batch_detect")){
         float thresh = find_float_arg(argc, argv, "-thresh", .24);
-        char *read_filename = (argc > 4) ? argv[4]: 0;
-        char *save_filename = (argc > 5) ? argv[5]: 0;
-        test_detector_kali("cfg/coco.data", argv[2], argv[3], read_filename, save_filename, thresh, .5);
+        char *read_filename = (argc > 5) ? argv[5]: 0;
+        char *save_filename = (argc > 6) ? argv[6]: 0;
+        char *txt_path = (argc > 7) ? argv[7]: 0;
+        if(argc>7)
+            test_detector_kali_txt(argv[2], argv[3], argv[4], read_filename, save_filename, txt_path, thresh, .5);
+        else if(argc>6)
+            test_detector_kali(argv[2], argv[3], argv[4], read_filename, save_filename, thresh, .5);
+        else
+        {
+            printf("Error:lack of parameter!\n");
+            printf("usage:see README.md!\n");
+        }
         //add by kali**********************************
     } else if (0 == strcmp(argv[1], "cifar")){
         run_cifar(argc, argv);
