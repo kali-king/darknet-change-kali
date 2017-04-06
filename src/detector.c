@@ -698,6 +698,8 @@ void test_detector_kali_txt(char *datacfg, char *cfgfile, char *weightfile, char
 
             //判断新的存储路径是否存在，不存在创建
             char *in_pos = strrchr(line_name,'/');
+	    if(in_pos == NULL)
+                in_pos = line_name;
             int len = (in_pos-line_name);
             char in_name[64];
             memset(in_name,0,sizeof(in_name));
